@@ -1,0 +1,12 @@
+# Ignore everything
+*
+
+# Except R/ and scripts/ folders
+!R/
+!R/**
+!scripts/
+!scripts/**
+
+# And the gitignore itself and README
+!.gitignore
+!README.md
