@@ -35,7 +35,7 @@ get_baseline_exclusion_ids <- function(Indexed_Diagnoses_Combined, cfg, verbose 
   .msg(verbose, "IDs excluded: ", length(excl_ids))
   
   list(
-    df_with_flags = df,               # keeps Date_diff/WithinBaselineWindow/ToBeExcluded in the dx table
+    df_with_flags = df,
     Excl_IDs = excl_ids
   )
 }
@@ -50,8 +50,39 @@ build_wide_after <- function(df_with_flags, Total_Dem, cfg, verbose = TRUE) {
   stopifnot(id_col %in% names(Total_Dem))
   stopifnot(all(c(id_col, "Simplified_diagnosis", "WithinBaselineWindow") %in% names(df_with_flags)))
   
-  # "After" = NOT within baseline window (matches your old logic)
-  dx_after <- df_with_flags %>%
+  # ---- Check if incidents column exists ----
+  has_incidents_col <- "incidents_of_Simplified_Diagnosis" %in% names(df_with_flags)
+  min_dx_dates <- cfg$min_dx_dates %||% 1L
+
+  if (!has_incidents_col && min_dx_dates > 1) {
+    warning(
+      "cfg$min_dx_dates = ", min_dx_dates,
+      " but 'incidents_of_Simplified_Diagnosis' column not found in dx data. ",
+      "Re-run scripts 01 and 02 to generate this column. No filtering applied."
+    )
+    min_dx_dates <- 1L
+  }
+
+  # ---- Apply min_dx_dates filter BEFORE pivoting ----
+  # Applies to ALL diagnoses. Any dx with fewer distinct date occurrences
+  # than cfg$min_dx_dates is dropped. The downstream code will select
+  # outcome_dx_values as needed.
+  dx_filtered <- df_with_flags
+
+  if (has_incidents_col && min_dx_dates > 1) {
+    .msg(verbose, "---- min_dx_dates filter (cfg$min_dx_dates = ", min_dx_dates, ") ----")
+    .msg(verbose, "Diagnosis rows before filter: ", nrow(df_with_flags))
+
+    dx_filtered <- dx_filtered %>%
+      dplyr::filter(incidents_of_Simplified_Diagnosis >= min_dx_dates)
+
+    .msg(verbose, "Diagnosis rows after filter:  ", nrow(dx_filtered))
+  } else {
+    .msg(verbose, "min_dx_dates = 1 → no incident-count filtering applied.")
+  }
+
+  # "After" = NOT within baseline window
+  dx_after <- dx_filtered %>%
     dplyr::filter(WithinBaselineWindow == 0L) %>%
     dplyr::select(dplyr::all_of(c(id_col, "Simplified_diagnosis"))) %>%
     dplyr::distinct() %>%
@@ -70,7 +101,7 @@ build_wide_after <- function(df_with_flags, Total_Dem, cfg, verbose = TRUE) {
   wide <- Total_Dem_dedup %>%
     dplyr::left_join(dx_after, by = setNames(id_col, id_col))
   
-  # replace NA in dx indicator columns with 0, but do NOT stomp demographic NAs
+  # Replace NA in dx indicator columns with 0, but do NOT stomp demographic NAs
   dx_cols <- setdiff(names(wide), names(Total_Dem_dedup))
   if (length(dx_cols) > 0) {
     wide[dx_cols] <- lapply(wide[dx_cols], function(x) { x[is.na(x)] <- 0L; x })
@@ -132,19 +163,17 @@ clean_for_table1 <- function(wide_df, cfg, verbose = TRUE) {
   # Do the cleaning
   out <- wide_df %>%
     dplyr::mutate(
-      # race lumping
       Race1 = dplyr::case_when(
         Race1 %in% cfg$race_of_interest ~ Race1,
         TRUE ~ "Other"
       ),
-      # gender cleanup
       Gender_Legal_Sex = dplyr::case_when(
         Gender_Legal_Sex %in% cfg$gender_unknown_values ~ cfg$gender_unknown_label,
         TRUE ~ Gender_Legal_Sex
       )
     )
   
-  # composites (only if columns exist)
+  # Composites (only if columns exist)
   abuse_inputs <- cfg$other_abuse_inputs
   abuse_inputs <- abuse_inputs[abuse_inputs %in% names(out)]
   if (length(abuse_inputs) > 0) {
@@ -167,7 +196,7 @@ clean_for_table1 <- function(wide_df, cfg, verbose = TRUE) {
     .msg(verbose, "Composite not created: none of cfg$ihd_inputs exist in dataset.")
   }
   
-  # collapse Moderate/Severe if requested
+  # Collapse Moderate/Severe if requested
   if (isTRUE(cfg$collapse_modsev)) {
     out <- out %>%
       dplyr::mutate(
@@ -179,12 +208,12 @@ clean_for_table1 <- function(wide_df, cfg, verbose = TRUE) {
       )
   }
   
-  # drop unwanted status values (e.g., Unclassified)
+  # Drop unwanted status values (e.g., Unclassified)
   if (length(cfg$drop_status_values) > 0) {
     out <- out %>% dplyr::filter(!(.data[[status_col]] %in% cfg$drop_status_values))
   }
   
-  # adults only
+  # Adults only
   out <- out %>% dplyr::filter(age_at_Index >= cfg$adult_min_age)
   
   # Treatment flag (status != "None")
@@ -197,3 +226,6 @@ clean_for_table1 <- function(wide_df, cfg, verbose = TRUE) {
   
   out
 }
+
+# Null coalescing operator (in case not loaded)
+`%||%` <- function(x, y) if (!is.null(x)) x else y
