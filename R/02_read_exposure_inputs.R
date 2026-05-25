@@ -112,9 +112,24 @@ read_diagnoses_group <- function(cfg,
         )
     }
     
+    # ---- Keep only rows with a matched diagnosis ----
     df <- df %>%
-      dplyr::filter(!is.na(Simplified_diagnosis)) %>%
-      dplyr::distinct(.data[[id_col]], Simplified_diagnosis, .keep_all = TRUE)
+      dplyr::filter(!is.na(Simplified_diagnosis))
+
+    # ---- Count distinct dates per EPIC_PMRN / Simplified_diagnosis ----
+    # This happens BEFORE deduplication so it captures all unique dates,
+    # regardless of whether the exact ICD code differs.
+    dx_counts <- df %>%
+      dplyr::group_by(.data[[id_col]], Simplified_diagnosis) %>%
+      dplyr::summarise(
+        incidents_of_Simplified_Diagnosis = dplyr::n_distinct(Date),
+        .groups = "drop"
+      )
+
+    # ---- Deduplicate: keep earliest date per EPIC_PMRN / Simplified_diagnosis ----
+    df <- df %>%
+      dplyr::distinct(.data[[id_col]], Simplified_diagnosis, .keep_all = TRUE) %>%
+      dplyr::left_join(dx_counts, by = c(id_col, "Simplified_diagnosis"))
     
     message("Finished processing file: ", file_path)
     df
@@ -122,7 +137,19 @@ read_diagnoses_group <- function(cfg,
   
   processed <- lapply(dia_files, read_one_dia)
   out <- dplyr::bind_rows(processed)
-  
+
+  # ---- Re-aggregate counts across files ----
+  # Each file is processed separately, so a patient may appear in multiple
+  # files. We re-sum the counts and re-deduplicate after binding all files.
+  out <- out %>%
+    dplyr::group_by(.data[[id_col]], Simplified_diagnosis) %>%
+    dplyr::mutate(
+      incidents_of_Simplified_Diagnosis = sum(incidents_of_Simplified_Diagnosis, na.rm = TRUE)
+    ) %>%
+    dplyr::arrange(Date) %>%
+    dplyr::slice(1) %>%   # keep earliest date row across all files
+    dplyr::ungroup()
+
   message("Number of unique ", id_col, "s in the diagnosis dataset (", group_tag, "): ",
           dplyr::n_distinct(out[[id_col]]))
   
@@ -134,7 +161,7 @@ read_diagnoses_exp <- function(data_dir, Dia_select_columns, ICDCodesCombined) {
   stop("Use read_diagnoses_group(cfg, ...) instead. This wrapper is deprecated to avoid mismatched cfg/data_dir.")
 }
 
-# New “correct” wrappers using cfg
+# New "correct" wrappers using cfg
 read_diagnoses_exp_cfg <- function(cfg, Dia_select_columns, ICDCodesCombined) {
   read_diagnoses_group(cfg, Dia_select_columns, ICDCodesCombined, group_tag = "Exp")
 }
