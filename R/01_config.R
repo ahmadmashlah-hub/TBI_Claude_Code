@@ -78,6 +78,14 @@ cfg$outcome_dx_values <- c("Tumor")  # diagnosis of interest (baseline exclusion
 #c("MultipleSclerosis",	"NeuromyelitisOptica",	"MOGAD",	"TransverseMyelitis",	"OtherCNSDemyelination",	"PeripheralNSDemyelination") 
 cfg$baseline_exclusion_days <- 365       # "within 1 year or before" = Date_diff < 365
 
+# ---- Minimum diagnosis date occurrences (incident case definition) ----
+# How many times must a Simplified_diagnosis appear on DISTINCT dates
+# (across all time, pre- and post-index) to count as a true positive case?
+# Set to 1 to keep current behaviour (no filtering).
+# Set to 2 or more to require multiple mentions before counting as incident.
+# Applies to cfg$outcome_dx_values only; all other diagnoses are unaffected.
+cfg$min_dx_dates <- 2
+
 #### ---- Sideline analysis ---- ####
 cfg$sub_dx_values <- c("Seizure_disorder")  # adjust to your Simplified_diagnosis labels
 cfg$sub_window_days <- 15  # ~1 months (use 180 if you prefer exact)
@@ -267,6 +275,13 @@ build_project_slug <- function(cfg,
     NULL
   }
   
+  # Minimum distinct diagnosis dates (incident case definition)
+  mindx_part <- if (!is.null(cfg$min_dx_dates) && cfg$min_dx_dates > 1) {
+    paste0("mindx", cfg$min_dx_dates)
+  } else {
+    NULL
+  }
+  
   # Matching
   match_part <- if (isTRUE(cfg$do_matching)) { paste0("Matched_",cfg$matching_mode) } else "Unmatched"
   
@@ -283,6 +298,7 @@ build_project_slug <- function(cfg,
     icd_part,
     enc_part,
     bl_part,
+    mindx_part,
     match_part,
     km_part
   )
