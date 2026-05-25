@@ -10,6 +10,7 @@
 #   06_exclusion_and_table1_prep.R           -> res_excl (df_with_flags), excl_ids
 
 source("R/00_packages.R")
+`%||%` <- function(x, y) if (!is.null(x)) x else y
 source("R/01_config.R")
 
 # -------------------------------------------------------
@@ -50,7 +51,8 @@ incident_dx <- df_flags %>%
     dplyr::all_of(id_col),
     Diagnosis      = Simplified_diagnosis,
     Diagnosis_Date = Date,
-    Date_diff
+    Date_diff,
+    dplyr::any_of("incidents_of_Simplified_Diagnosis")
   ) %>%
   dplyr::mutate(
     Injury_to_diagnosis_in_months = round(Date_diff / 30, 2)
@@ -139,9 +141,10 @@ summary_sheet <- tibble::tibble(
     "--- Definitions ---",
     paste0("Acute imaging: closest scan within -2 to <= ", cfg$imaging_acute_days, " days of injury date"),
     paste0("Follow-up imaging: latest scan that is > ", cfg$imaging_followup_days, " days from injury date"),
-    paste0("Diagnoses included: ", paste(cfg$outcome_dx_values, collapse = ", "))
+    paste0("Diagnoses included: ", paste(cfg$outcome_dx_values, collapse = ", ")),
+    paste0("Min distinct dx dates required (cfg$min_dx_dates): ", cfg$min_dx_dates %||% 1)
   ),
-  N       = c(n_cases, n_acute_ct, n_acute_mri, n_fu_ct, n_fu_mri, n_acute_and_fu, NA, NA, NA, NA, NA),
+  N       = c(n_cases, n_acute_ct, n_acute_mri, n_fu_ct, n_fu_mri, n_acute_and_fu, NA, NA, NA, NA, NA, NA),
   Percent = c(
     100,
     round(100 * n_acute_ct  / n_cases, 1),
@@ -149,7 +152,7 @@ summary_sheet <- tibble::tibble(
     round(100 * n_fu_ct     / n_cases, 1),
     round(100 * n_fu_mri      / n_cases, 1),
     round(100 * n_acute_and_fu / n_cases, 1),
-    NA, NA, NA, NA, NA
+    NA, NA, NA, NA, NA, NA
   )
 )
 
